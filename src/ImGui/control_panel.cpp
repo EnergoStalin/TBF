@@ -84,9 +84,8 @@ TBFix_GetAudioMeterInfo (void)
 
 
 
-__declspec (dllimport)
 bool
-SK_ImGui_ControlPanel (void);
+SK_ImGui_ControlPanel (void) { return false; }
 
 
 bool show_config          = true;
