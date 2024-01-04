@@ -32,10 +32,10 @@ jobs:
 
     - name: Build
       working-directory: ${{env.GITHUB_WORKSPACE}}
-      run: msbuild /m "/p:Platform=x64;Configuration=Release" "./tbf.sln"
+      run: msbuild /m "/p:Platform=x64;Configuration=Debug" "./tbf.sln"
 
     - uses: actions/upload-artifact@v4
       with:
         name: tbfix
-        path: build/release/*
+        path: build/debug/*
         retention-days: 7
