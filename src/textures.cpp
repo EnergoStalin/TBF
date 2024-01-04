@@ -53,39 +53,10 @@
 #define TBFIX_TEXTURE_EXT L".dds"
 
 
-typedef HRESULT (STDMETHODCALLTYPE *StretchRect_pfn)
-  (      IDirect3DDevice9    *This,
-         IDirect3DSurface9   *pSourceSurface,
-   const RECT                *pSourceRect,
-         IDirect3DSurface9   *pDestSurface,
-   const RECT                *pDestRect,
-         D3DTEXTUREFILTERTYPE Filter
-  );
-
-typedef HRESULT (STDMETHODCALLTYPE *SetRenderState_pfn)
-(
-  IDirect3DDevice9*  This,
-  D3DRENDERSTATETYPE State,
-  DWORD              Value
-);
-
-typedef HRESULT (WINAPI *D3DXLoadSurfaceFromSurface_pfn)
-(
-  _In_       LPDIRECT3DSURFACE9  pDestSurface,
-  _In_ const PALETTEENTRY       *pDestPalette,
-  _In_ const RECT               *pDestRect,
-  _In_       LPDIRECT3DSURFACE9  pSrcSurface,
-  _In_ const PALETTEENTRY       *pSrcPalette,
-  _In_ const RECT               *pSrcRect,
-  _In_       DWORD               Filter,
-  _In_       D3DCOLOR            ColorKey
-);
-
-
 static D3DXSaveTextureToFile_pfn               D3DXSaveTextureToFile                        = nullptr;
 static D3DXCreateTextureFromFileInMemoryEx_pfn D3DXCreateTextureFromFileInMemoryEx_Original = nullptr;
 
-static BeginScene_pfn                          D3D9BeginScene                               = nullptr;
+       BeginScene_pfn                          D3D9BeginScene                               = nullptr;
        SetRenderState_pfn                      D3D9SetRenderState                           = nullptr;
 
 static StretchRect_pfn                         D3D9StretchRect                              = nullptr;
@@ -676,6 +647,10 @@ D3D9SetRenderState_Detour (IDirect3DDevice9*  This,
   }
 #endif
 
+
+  if (State == D3DRS_SCISSORTESTENABLE)
+    tbf::RenderFix::draw_state.scissor_test = (Value != FALSE);
+
   return D3D9SetRenderState (This, State, Value);
 }
 
@@ -815,7 +790,6 @@ D3D9StretchRect_Detour (      IDirect3DDevice9    *This,
 }
 
 
-std::set <UINT> tbf::RenderFix::active_samplers;
 extern IDirect3DTexture9* pFontTex;
 
 COM_DECLSPEC_NOTHROW
@@ -835,14 +809,7 @@ D3D9SetDepthStencilSurface_Detour (
 }
 
 
-uint32_t debug_tex_id = 0UL;
-uint32_t current_tex [256] = { 0ui32 };
-
-typedef HRESULT (STDMETHODCALLTYPE *SetSamplerState_pfn)
-(IDirect3DDevice9*   This,
-  DWORD               Sampler,
-  D3DSAMPLERSTATETYPE Type,
-  DWORD               Value);
+uint32_t debug_tex_id      =   0UL;
 
 extern SetSamplerState_pfn D3D9SetSamplerState_Original;
 
@@ -906,7 +873,7 @@ D3D9SetTexture_Detour (
     ISKTextureD3D9* pSKTex =
       (ISKTextureD3D9 *)pTexture;
 
-    current_tex [std::min (255UL, Sampler)] = pSKTex->tex_crc32;
+    tbf::RenderFix::draw_state.current_tex [std::min (255UL, Sampler)] = pSKTex->tex_crc32;
 
     if (vs_checksum == tbf::RenderFix::tracked_vs.crc32)  tbf::RenderFix::tracked_vs.current_textures [std::min (15UL, Sampler)] = pSKTex->tex_crc32;
     if (ps_checksum == tbf::RenderFix::tracked_ps.crc32)  tbf::RenderFix::tracked_ps.current_textures [std::min (15UL, Sampler)] = pSKTex->tex_crc32;
@@ -1084,8 +1051,8 @@ D3D9CreateTexture_Detour (IDirect3DDevice9   *This,
   // Post-Processing ( NextPowerOfTwo (w/2) x NextPowerOfTwo (w/2) / 2 ) - FIXME damnit!
   //
   else if ( (   Usage  == D3DUSAGE_RENDERTARGET && Format == D3DFMT_A8R8G8B8 ) &&
-              ( Width  == TBF_NextPowerOfTwo (tbf::RenderFix::width / 2) &&
-                Height == TBF_NextPowerOfTwo (tbf::RenderFix::width / 2) / 2 )  )
+              ( Width  ==  TBF_NextPowerOfTwo ( tbf::RenderFix::width  / 2 )   &&
+                Height == (TBF_NextPowerOfTwo ( tbf::RenderFix::height / 2 ) >> 1) ) )
   {
     rt_classify.postproc.type = rt_classify.postproc.DepthOfField;
 
@@ -1094,11 +1061,11 @@ D3D9CreateTexture_Detour (IDirect3DDevice9   *This,
       Width  = (UINT)(tbf::RenderFix::width  * config.render.postproc_ratio);
       Height = (UINT)(tbf::RenderFix::height * config.render.postproc_ratio);
 
-      if (config.render.force_post_mips)
-        Levels = 1 + (UINT)floor (log2 (std::max (Width, Height)));
-
       tex_log->Log (L"[ PostProc ] (Post-Resolution: (%lu x %lu)", Width, Height);
     }
+
+    if (config.render.force_post_mips)
+      Levels = 1 + (UINT)floor (log2 (std::max (Width, Height)));
   }
 
   else if (   ( config.render.fix_map_res    ||
@@ -1117,10 +1084,10 @@ D3D9CreateTexture_Detour (IDirect3DDevice9   *This,
       if (config.render.high_res_reflection)
       {
         Width *= 2; Height *= 2;
-
-        if (config.render.force_post_mips)
-          Levels = 1 + (UINT)floor (log2 (std::max (Width, Height)));
       }
+
+      if (config.render.force_post_mips)
+        Levels = 1 + (UINT)floor (log2 (std::max (Width, Height)));
     }
 
     if ( Original_Width  == tbf::RenderFix::width  / 4 &&
@@ -1131,10 +1098,10 @@ D3D9CreateTexture_Detour (IDirect3DDevice9   *This,
       if (config.render.high_res_bloom)
       {
         Width *= 2; Height *= 2;
-
-        if (config.render.force_post_mips)
-          Levels = 1 + (UINT)floor (log2 (std::max (Width, Height)));
       }
+
+      if (config.render.force_post_mips)
+        Levels = 1 + (UINT)floor (log2 (std::max (Width, Height)));
     }
 
     if ( Original_Width != Original_Height && (Original_Width / Original_Height == tbf::RenderFix::width / tbf::RenderFix::height) &&
@@ -1148,14 +1115,12 @@ D3D9CreateTexture_Detour (IDirect3DDevice9   *This,
       if (config.render.fix_map_res)
       {
         Width = tbf::RenderFix::width; Height = tbf::RenderFix::height;
-
-        if (config.render.force_post_mips)
-          Levels = 1 + (UINT)floor (log2 (std::max (Width, Height)));
       }
+
+      if (config.render.force_post_mips)
+        Levels = 1 + (UINT)floor (log2 (std::max (Width, Height)));
     }
   }
-
-  int levels = Levels;
 
   if ( config.render.half_float_shadows &&
        (Usage & D3DUSAGE_RENDERTARGET ) &&
@@ -1163,6 +1128,8 @@ D3D9CreateTexture_Detour (IDirect3DDevice9   *This,
   {
     Format = D3DFMT_R16F;
   }
+
+  int levels = Levels;
 
   HRESULT result = 
     D3D9CreateTexture (This, Width, Height, levels, Usage,
@@ -1273,52 +1240,13 @@ extern
 uint32_t
 crc32 (uint32_t crc, const void *buf, size_t size);
 
-typedef HRESULT (WINAPI *D3DXGetImageInfoFromFileInMemory_pfn)
-(
-  _In_ LPCVOID        pSrcData,
-  _In_ UINT           SrcDataSize,
-  _In_ D3DXIMAGE_INFO *pSrcInfo
-);
 
 D3DXGetImageInfoFromFileInMemory_pfn
   D3DXGetImageInfoFromFileInMemory = nullptr;
-
-typedef HRESULT (WINAPI *D3DXGetImageInfoFromFile_pfn)
-(
-  _In_ LPCWSTR         pSrcFile,
-  _In_ D3DXIMAGE_INFO *pSrcInfo
-);
-
 D3DXGetImageInfoFromFile_pfn
-  D3DXGetImageInfoFromFile = nullptr;
-
-typedef HRESULT (WINAPI *D3DXCreateTextureFromFileEx_pfn)
-(
-  _In_    LPDIRECT3DDEVICE9  pDevice,
-  _In_    LPCWSTR            pSrcFile,
-  _In_    UINT               Width,
-  _In_    UINT               Height,
-  _In_    UINT               MipLevels,
-  _In_    DWORD              Usage,
-  _In_    D3DFORMAT          Format,
-  _In_    D3DPOOL            Pool,
-  _In_    DWORD              Filter,
-  _In_    DWORD              MipFilter,
-  _In_    D3DCOLOR           ColorKey,
-  _Inout_ D3DXIMAGE_INFO     *pSrcInfo,
-  _Out_   PALETTEENTRY       *pPalette,
-  _Out_   LPDIRECT3DTEXTURE9 *ppTexture
-);
-
+  D3DXGetImageInfoFromFile         = nullptr;
 D3DXCreateTextureFromFileEx_pfn
-  D3DXCreateTextureFromFileEx = nullptr;
-
-typedef HRESULT (WINAPI *D3DXCreateTextureFromFile_pfn)
-(
-  _In_  LPDIRECT3DDEVICE9   pDevice,
-  _In_  LPCWSTR             pSrcFile,
-  _Out_ LPDIRECT3DTEXTURE9 *ppTexture
-);
+  D3DXCreateTextureFromFileEx      = nullptr;
 
 static D3DXCreateTextureFromFile_pfn
   D3DXCreateTextureFromFile = nullptr;

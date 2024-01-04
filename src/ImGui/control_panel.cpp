@@ -259,7 +259,7 @@ TBFix_KeybindDialog (keybind_s* keybind)
 
   ImGui::SetNextWindowSizeConstraints ( ImVec2 (font_size * 9, font_size * 3), ImVec2 (font_size * 30, font_size * 6));
 
-  if (ImGui::BeginPopupModal ("Keyboard Binding", NULL, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_ShowBorders))
+  if (ImGui::BeginPopupModal (keybind->bind_name, NULL, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_ShowBorders))
   {
     ImGui::GetIO ().WantCaptureKeyboard = false;
 
@@ -439,10 +439,10 @@ TBFix_DrawConfigUI (void)
   {
     frame = 0;
 
-    io.DisplaySize.x = tbf::RenderFix::width;
-    io.DisplaySize.y = tbf::RenderFix::height;
+    io.DisplaySize.x = (float)tbf::RenderFix::width;
+    io.DisplaySize.y = (float)tbf::RenderFix::height;
 
-    ImGui::SetNextWindowPosCenter (ImGuiSetCond_Always);;
+    ImGui::SetNextWindowPosCenter (ImGuiSetCond_Always);
   }
 
   ImGui::SetNextWindowSizeConstraints (ImVec2 (665, 50), ImVec2 ( ImGui::GetIO ().DisplaySize.x * 0.95f,
@@ -453,7 +453,8 @@ TBFix_DrawConfigUI (void)
     was_reset = false;
   }
 
-  bool show_config = true;
+  static bool hook_marshall = true;
+        bool show_config    = true;
 
   ImGui::Begin ( "Tales of Berseria \"Fix\" (v " TBF_VERSION_STR_A ") Control Panel",
                    &show_config,
@@ -676,13 +677,16 @@ TBFix_DrawConfigUI (void)
         ImGui::TreePop  ();
       }
 
-      ImGui::SliderFloat ("Mipmap LOD Bias", &config.textures.lod_bias, -3.0f, /*config.textures.uncompressed ? 16.0f :*/ 3.0f);
-
-      if (ImGui::IsItemHovered ())
+      if (! *(bool *)SK_GetCommandProcessor ()->ProcessCommandLine ("d3d9.HasBrokenMipmapLODBias").getVariable ()->getValuePointer ())
       {
-        ImGui::BeginTooltip ();
-        ImGui::Text         ("Controls texture sharpness;  -3 = Sharpest (WILL shimmer),  0 = Neutral,  3 = Blurry");
-        ImGui::EndTooltip   ();
+        ImGui::SliderFloat ("Mipmap LOD Bias", &config.textures.lod_bias, -3.0f, /*config.textures.uncompressed ? 16.0f :*/ 3.0f);
+        
+        if (ImGui::IsItemHovered ())
+        {
+          ImGui::BeginTooltip ();
+          ImGui::Text         ("Controls texture sharpness;  -3 = Sharpest (WILL shimmer),  0 = Neutral,  3 = Blurry");
+          ImGui::EndTooltip   ();
+        }
       }
 
       ImGui::TreePop ();
@@ -1031,6 +1035,52 @@ TBFix_DrawConfigUI (void)
 #endif
   }
 
+  if (ImGui::CollapsingHeader ("Aspect Ratio"))
+  {
+    ImGui::TreePush ("");
+
+    ImGui::Checkbox ("Enable Aspect Ratio Correction", &config.render.aspect_correction);
+    if (ImGui::IsItemHovered ())
+      ImGui::SetTooltip ("The first time you enable this, return to the title screen to have the camera's aspect ratio corrected.\n\n"
+                         "Also turn off the game's Aspect Ratio Correction feature.");
+
+    ImGui::Checkbox ("Clear Black Bars During Videos", &config.render.clear_blackbars);
+
+#if 0
+    if (ImGui::SliderFloat ("Field of View", aspect_ratio.fov_addrs [aspect_ratio.selector], 45.0f, 90.0f)) {
+      //aspect_ratio.setFOV (fov);
+    }
+
+    ImGui::SliderInt ("Field of View Selector", &aspect_ratio.selector, 0, aspect_ratio.fov_count-1);
+    ImGui::Text ("FoV Addr: %p", aspect_ratio.fov_addrs [aspect_ratio.selector]);
+#endif
+
+    ImGui::Text ("Aspect Ratio Toggle Keybinding:  %ws",  config.keyboard.aspect_ratio.human_readable.c_str ());
+
+    if (ImGui::IsItemHovered ()) {
+      ImGui::SetTooltip ("Click here to change.");
+    }
+
+    if (ImGui::IsItemClicked ()) {
+      ImGui::OpenPopup (config.keyboard.aspect_ratio.bind_name);
+    }
+
+    TBFix_KeybindDialog (&config.keyboard.aspect_ratio);
+
+    extern float original_aspect;
+
+    if ( original_aspect > config.render.aspect_ratio + 0.001f ||
+         original_aspect < config.render.aspect_ratio - 0.001f ) {
+      ImGui::Separator ();
+
+      ImGui::Bullet (); ImGui::SameLine ();
+
+      ImGui::TextColored (ImVec4 (1.0f, 0.8f, 0.2f, 1.0f), "Aspect Ratio Has Changed Since Startup, for best results return to the title screen.");
+    }
+
+    ImGui::TreePop ();
+  }
+
   if (ImGui::CollapsingHeader ("Post-Processing"))
   {
     ImGui::TreePush ("");
@@ -1125,9 +1175,6 @@ TBFix_DrawConfigUI (void)
       ImGui::BulletText   ("Still extremely experimental; not saved in config file.");
       ImGui::EndTooltip   ();
     }
-
-    tbf::RenderFix::need_reset.graphics |=
-      ImGui::Checkbox ("Enable Debug Validation Layer", &config.render.validation);
 
     ImGui::TreePop ();
   }
@@ -1264,7 +1311,7 @@ TBFix_DrawConfigUI (void)
     }
 
     if (ImGui::IsItemClicked ()) {
-      ImGui::OpenPopup ("Keyboard Binding");
+      ImGui::OpenPopup (config.keyboard.hudless.bind_name);
     }
 
     TBFix_KeybindDialog (&config.keyboard.hudless);
@@ -1484,27 +1531,135 @@ TBFix_DrawConfigUI (void)
   {
     ImGui::TreePush ("");
 
+    ImGui::Columns (3);
+
     ImGui::Checkbox ("Hollow Eye Mode", &config.fun_stuff.hollow_eye_mode);
     if (ImGui::IsItemHovered ())
       ImGui::SetTooltip ("The stuff nightmares are made from.");
 
-    ImGui::SameLine ();
+    ImGui::NextColumn ();
 
     ImGui::Checkbox ("Plastic Mode", &config.fun_stuff.plastic_mode);
     if (ImGui::IsItemHovered ())
       ImGui::SetTooltip ("It's fantastic.");
 
+    ImGui::NextColumn ();
+
     ImGui::Checkbox ("Disable Smoke",   &config.fun_stuff.disable_smoke);
     if (ImGui::IsItemHovered ())
       ImGui::SetTooltip ("Does not disable all smoke... just the super obnoxious concentric ring (banding from hell) variety that makes you want to gouge your eyes out in dungeons.");
 
-    ImGui::SameLine ();
+    ImGui::NextColumn ();
 
     ImGui::Checkbox ("Disable Pause Screen Dimming", &config.fun_stuff.disable_pause_dim);
     if (ImGui::IsItemHovered ())
       ImGui::SetTooltip ("Potentially useful for texture modders who need stuff to stand still but do not want the screen dimmed -- use with the mod's Auto-Pause feature.");
 
+    ImGui::NextColumn ();
+
+    float* fSpeed = (float *)(0x1409C64F0);
+
+    DWORD dwOriginal;
+    VirtualProtect ((LPVOID)fSpeed, sizeof (float), PAGE_EXECUTE_READWRITE, &dwOriginal);
+
+    bool humming_bird = *fSpeed == 12.0f;
+
+    if (ImGui::Checkbox ("Speed Run Mode", &humming_bird)) {
+      if (humming_bird) *fSpeed = 12.0f;
+      else              *fSpeed = 60.0f;
+    }
+
+    VirtualProtect((LPVOID)fSpeed, sizeof (float), dwOriginal, &dwOriginal);
+
+    ImGui::Columns (1);
+
     ImGui::TreePop  ();
+  }
+
+  if (ImGui::CollapsingHeader ("Debug"))
+  {
+    ImGui::TreePush ("");
+
+    ImGui::BeginGroup   ();
+    ImGui::PushStyleVar (ImGuiStyleVar_ChildWindowRounding, 15.0f);
+    ImGui::BeginChild   ("Debug Flags", ImVec2 ( font_size           * 35,
+                                                 font_size_multiline * ( 1.3f + ( (MAX_FLAGS / 4) +
+                                                                                  (MAX_FLAGS % 4 > 0 ? 1 : 0) ) ) ),
+                                             true );
+    for (int i = 0; i < MAX_FLAGS; i++)
+    {
+      char szDesc [32] = { '\0' };
+      if (i == 0)
+        sprintf (szDesc, "Base %06x", (uint32_t)START_FLAG + i);
+      else
+        sprintf (szDesc, "Flag [%#4lu]", i);
+
+      extern uintptr_t
+      TBF_GetBaseAddr (void);
+
+      uint8_t* flag = (uint8_t *)(TBF_GetBaseAddr () + START_FLAG + i);
+
+      bool bFlag = *flag != 0;
+
+      if (ImGui::Checkbox (szDesc, &bFlag))
+        *flag = (bFlag ? 1 : 0);
+
+      if (((i + 1) % 4) != 0 && i != (MAX_FLAGS - 1))
+        ImGui::SameLine ();
+    }
+
+    ImGui::EndChild ();
+    ImGui::EndGroup ();
+
+    ImGui::SameLine   ();
+    ImGui::BeginGroup ();
+
+    tbf::RenderFix::need_reset.graphics |=
+      ImGui::Checkbox ("Enable D3D9 Debug Validation Layer", &config.render.validation);
+
+    ImGui::Checkbox ("Marshall UI Draws Through Hooked Procedures", &hook_marshall);
+
+    ImGui::Separator ();
+
+    ImGui::Text ("  Clear Enemies Keybinding:  %ws",  config.keyboard.clear_enemies.human_readable.c_str ());
+
+    if (ImGui::IsItemHovered ()) {
+      ImGui::SetTooltip ("Click here to change.");
+    }
+
+    if (ImGui::IsItemClicked ()) {
+      ImGui::OpenPopup (config.keyboard.clear_enemies.bind_name);
+    }
+
+    TBFix_KeybindDialog (&config.keyboard.clear_enemies);
+
+    ImGui::Text ("Respawn Enemies Keybinding:  %ws",  config.keyboard.respawn_enemies.human_readable.c_str ());
+
+    if (ImGui::IsItemHovered ()) {
+      ImGui::SetTooltip ("Click here to change.");
+    }
+
+    if (ImGui::IsItemClicked ()) {
+      ImGui::OpenPopup (config.keyboard.respawn_enemies.bind_name);
+    }
+
+    TBFix_KeybindDialog (&config.keyboard.respawn_enemies);
+
+    ImGui::Text ("Battle Timestop Keybinding:  %ws",  config.keyboard.battle_timestop.human_readable.c_str ());
+
+    if (ImGui::IsItemHovered ()) {
+      ImGui::SetTooltip ("Click here to change.");
+    }
+
+    if (ImGui::IsItemClicked ()) {
+      ImGui::OpenPopup (config.keyboard.battle_timestop.bind_name);
+    }
+
+    TBFix_KeybindDialog (&config.keyboard.battle_timestop);
+
+    ImGui::EndGroup ();
+
+    ImGui::TreePop ();
   }
 
   ImGui::PopItemWidth ();
@@ -1605,13 +1760,16 @@ TBFix_DrawConfigUI (void)
     show_texture_mod_dlg = TBFix_TextureModDlg ();
   }
 
+  extern EndScene_pfn   D3D9EndScene;
+  extern BeginScene_pfn D3D9BeginScene;
+
   if ( SUCCEEDED (
-         tbf::RenderFix::pDevice->BeginScene ()
+         hook_marshall ? tbf::RenderFix::pDevice->BeginScene () : D3D9BeginScene (tbf::RenderFix::pDevice)
        )
      )
   {
     ImGui::Render                     ();
-    tbf::RenderFix::pDevice->EndScene ();
+    hook_marshall ? tbf::RenderFix::pDevice->EndScene () : D3D9EndScene (tbf::RenderFix::pDevice);
   }
 
   if (! show_config)

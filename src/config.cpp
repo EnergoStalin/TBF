@@ -38,6 +38,8 @@ extern HMODULE hInjectorDLL;
 std::wstring TBF_VER_STR = TBF_VERSION_STR_W;
 std::wstring DEFAULT_BK2 = L"RAW\\MOVIE\\AM_TOZ_OP_001.BK2";
 
+bool         nv_profile_change = false;
+
 static
   iSK_INI*   dll_ini      = nullptr;
 static
@@ -69,8 +71,8 @@ struct {
   tbf::ParameterInt*     aspect_addr;
   tbf::ParameterFloat*   fovy;
   tbf::ParameterFloat*   aspect_ratio;
-  tbf::ParameterBool*    aspect_correct_vids;
   tbf::ParameterBool*    aspect_correction;
+  tbf::ParameterStringW* aspect_ratio_keybind;
   tbf::ParameterBool*    clear_blackbars;
 
   tbf::ParameterFloat*   postproc_ratio;
@@ -140,6 +142,10 @@ struct {
 struct {
   tbf::ParameterStringW* swap_keys;
   tbf::ParameterBool*    swap_wasd;
+
+  tbf::ParameterStringW* clear_enemies;
+  tbf::ParameterStringW* respawn_enemies;
+  tbf::ParameterStringW* battle_timestop;
 } keyboard;
 
 
@@ -461,6 +467,39 @@ TBF_LoadConfig (std::wstring name)
       L"Resolution.PostProcess",
         L"HighResReflection" );
 
+  render.aspect_ratio =
+    static_cast <tbf::ParameterFloat *>
+      (g_ParameterFactory.create_parameter <float> (
+        L"Last Known Aspect Ratio")
+    );
+  render.aspect_ratio->register_to_ini (
+    render_ini,
+      L"Resolution.AspectRatio",
+        L"LastKnownRatio"
+  );
+
+  render.aspect_correction =
+    static_cast <tbf::ParameterBool *>
+      (g_ParameterFactory.create_parameter <bool> (
+        L"Apply Aspect Ratio Correction")
+    );
+  render.aspect_correction->register_to_ini (
+    render_ini,
+      L"Resolution.AspectRatio",
+        L"ApplyCorrection"
+  );
+
+  render.clear_blackbars =
+    static_cast <tbf::ParameterBool *>
+      (g_ParameterFactory.create_parameter <bool> (
+        L"Clear Blackbars (in video)")
+    );
+  render.clear_blackbars->register_to_ini (
+    render_ini,
+      L"Resolution.AspectRatio",
+        L"ClearBlackbars"
+  );
+
   render.postproc_ratio =
     static_cast <tbf::ParameterFloat *>
       (g_ParameterFactory.create_parameter <float> (
@@ -671,6 +710,17 @@ TBF_LoadConfig (std::wstring name)
         L"CompatibilityBits"
   );
 
+  render.aspect_ratio_keybind =
+    static_cast <tbf::ParameterStringW *>
+    (g_ParameterFactory.create_parameter <std::wstring> (
+      L"Aspect Ratio Toggle Keybinding")
+    );
+
+  render.aspect_ratio_keybind->register_to_ini (
+    render_ini,
+      L"Resolution.AspectRatio",
+        L"Keybind_Toggle" );
+
 
 
   screenshots.hudless_keybind =
@@ -779,6 +829,37 @@ TBF_LoadConfig (std::wstring name)
       L"Keyboard.Remap",
         L"SwapKeys" );
 
+  keyboard.clear_enemies =
+    static_cast <tbf::ParameterStringW *>
+    (g_ParameterFactory.create_parameter <std::wstring>(
+         L"Clear Enemies On Screen")
+    );
+  keyboard.clear_enemies->register_to_ini (
+    keyboard_ini,
+      L"Keyboard.Debug",
+        L"ClearEnemies" );
+
+  keyboard.respawn_enemies =
+    static_cast <tbf::ParameterStringW *>
+    (g_ParameterFactory.create_parameter <std::wstring>(
+         L"Respawn Enemies On Screen")
+    );
+  keyboard.respawn_enemies->register_to_ini (
+    keyboard_ini,
+      L"Keyboard.Debug",
+        L"RespawnEnemies" );
+
+  keyboard.battle_timestop =
+    static_cast <tbf::ParameterStringW *>
+    (g_ParameterFactory.create_parameter <std::wstring> (
+         L"Pause Battle")
+    );
+  keyboard.battle_timestop->register_to_ini (
+    keyboard_ini,
+      L"Keyboard.Debug",
+        L"BattleTimestop" );
+
+
 
   sys.version =
     static_cast <tbf::ParameterStringW *>
@@ -834,23 +915,27 @@ TBF_LoadConfig (std::wstring name)
   input.gamepad.texture_set->load         (config.input.gamepad.texture_set);
   input.gamepad.virtual_controllers->load (config.input.gamepad.virtual_controllers);
 
-  keyboard.swap_wasd->load            (config.keyboard.swap_wasd);
-  keyboard.swap_keys->load            (config.keyboard.swap_keys);
+  keyboard.swap_wasd->load                (config.keyboard.swap_wasd);
+  keyboard.swap_keys->load                (config.keyboard.swap_keys);
 
-  render.rescale_shadows->load        (config.render.shadow_rescale);
-  render.rescale_env_shadows->load    (config.render.env_shadow_rescale);
-  render.half_precision_shadows->load (config.render.half_float_shadows);
+  render.rescale_shadows->load            (config.render.shadow_rescale);
+  render.rescale_env_shadows->load        (config.render.env_shadow_rescale);
+  render.half_precision_shadows->load     (config.render.half_float_shadows);
 
-  render.dump_shaders->load        (config.render.dump_shaders);
-  render.fix_map_res->load         (config.render.fix_map_res);
-  render.high_res_bloom->load      (config.render.high_res_bloom);
-  render.high_res_reflection->load (config.render.high_res_reflection);
-  render.postproc_ratio->load      (config.render.postproc_ratio);
-  render.pause_on_ui->load         (config.input.ui.pause);
-  render.show_osd_disclaimer->load (config.render.osd_disclaimer);
-  render.auto_apply_changes->load  (config.render.auto_apply_changes);
-  render.ui_scale->load            (config.input.ui.scale);
-  render.never_show_eula->load     (config.input.ui.never_show_eula);
+  render.aspect_correction->load          (config.render.aspect_correction);
+  render.aspect_ratio->load               (config.render.aspect_ratio);
+  render.clear_blackbars->load            (config.render.clear_blackbars);
+
+  render.dump_shaders->load               (config.render.dump_shaders);
+  render.fix_map_res->load                (config.render.fix_map_res);
+  render.high_res_bloom->load             (config.render.high_res_bloom);
+  render.high_res_reflection->load        (config.render.high_res_reflection);
+  render.postproc_ratio->load             (config.render.postproc_ratio);
+  render.pause_on_ui->load                (config.input.ui.pause);
+  render.show_osd_disclaimer->load        (config.render.osd_disclaimer);
+  render.auto_apply_changes->load         (config.render.auto_apply_changes);
+  render.ui_scale->load                   (config.input.ui.scale);
+  render.never_show_eula->load            (config.input.ui.never_show_eula);
 
   render.smaa.preset->load                (config.render.smaa.quality_preset);
   render.smaa.override_game->load         (config.render.smaa.override_game);
@@ -864,9 +949,6 @@ TBF_LoadConfig (std::wstring name)
   render.smaa.reprojection_weight->load   (config.render.smaa.reprojection_weight);
 
   std::wstring sgssaa;
-
-  int          original_sgssaa = config.render.nv.sgssaa_mode;
-  std::wstring original_bits   = config.render.nv.compat_bits;
 
   render.nvidia_sgssaa->load         (sgssaa);
   render.nvidia_aa_compat_bits->load (config.render.nv.compat_bits
@@ -888,8 +970,7 @@ TBF_LoadConfig (std::wstring name)
 
     // Only change the driver profile if settings change in-game or
     //   if a non-off mode is selected.
-    if ( config.render.nv.sgssaa_mode != 0 ||
-         config.render.nv.sgssaa_mode != config.render.nv.sgssaa_mode )
+    if ( config.render.nv.sgssaa_mode != 0 )
       tbf::RenderFix::InstallSGSSAA ();
   }
 
@@ -902,8 +983,16 @@ TBF_LoadConfig (std::wstring name)
   screenshots.add_to_steam->load    (config.screenshots.import_to_steam);
   screenshots.keep->load            (config.screenshots.keep);
   screenshots.hudless_keybind->load (config.keyboard.hudless.human_readable);
+  render.aspect_ratio_keybind->load (config.keyboard.aspect_ratio.human_readable);
+  keyboard.clear_enemies->load      (config.keyboard.clear_enemies.human_readable);
+  keyboard.respawn_enemies->load    (config.keyboard.respawn_enemies.human_readable);
+  keyboard.battle_timestop->load    (config.keyboard.battle_timestop.human_readable);
 
-  config.keyboard.hudless.parse ();
+  config.keyboard.hudless.parse         ();
+  config.keyboard.aspect_ratio.parse    ();
+  config.keyboard.clear_enemies.parse   ();
+  config.keyboard.respawn_enemies.parse ();
+  config.keyboard.battle_timestop.parse ();
 
   textures.remaster->load          (config.textures.remaster);
   textures.uncompressed->load      (config.textures.uncompressed);
@@ -941,6 +1030,10 @@ TBF_SaveConfig (std::wstring name, bool close_config)
 
   render.dump_shaders->store        (config.render.dump_shaders);
 
+  render.aspect_correction->store      (config.render.aspect_correction);
+  render.aspect_ratio->store           (config.render.aspect_ratio);
+  render.clear_blackbars->store        (config.render.clear_blackbars);
+
   render.rescale_shadows->store        (config.render.shadow_rescale);
   render.rescale_env_shadows->store    (config.render.env_shadow_rescale);
   render.half_precision_shadows->store (config.render.half_float_shadows);
@@ -965,10 +1058,17 @@ TBF_SaveConfig (std::wstring name, bool close_config)
   render.smaa.predication_strength->store  (config.render.smaa.predication_strength);
   render.smaa.reprojection_weight->store   (config.render.smaa.reprojection_weight);
 
-  render.nvidia_sgssaa->store ( config.render.nv.sgssaa_mode == 0 ? L"off" :
-                                config.render.nv.sgssaa_mode == 1 ? L"2x"  :
-                                config.render.nv.sgssaa_mode == 2 ? L"4x"  : L"8x" );
-  render.nvidia_aa_compat_bits->store (config.render.nv.compat_bits);
+  std::wstring sgssaa_original, sgssaa_now;
+
+  render.nvidia_sgssaa->load          (sgssaa_original);
+  render.nvidia_sgssaa->store         ( config.render.nv.sgssaa_mode == 0 ? L"off" :
+                                        config.render.nv.sgssaa_mode == 1 ? L"2x"  :
+                                        config.render.nv.sgssaa_mode == 2 ? L"4x"  : L"8x" );
+  render.nvidia_aa_compat_bits->store ( config.render.nv.compat_bits );
+  render.nvidia_sgssaa->load          (sgssaa_now);
+
+  if (sgssaa_original != sgssaa_now)
+    nv_profile_change = true;
 
   textures.remaster->store          (config.textures.remaster);
   textures.uncompressed->store      (config.textures.uncompressed);
@@ -989,14 +1089,22 @@ TBF_SaveConfig (std::wstring name, bool close_config)
   input.gamepad.texture_set->store         (config.input.gamepad.texture_set);
   input.gamepad.virtual_controllers->store (config.input.gamepad.virtual_controllers);
 
-  config.keyboard.hudless.update ();
+  config.keyboard.hudless.update         ();
+  config.keyboard.aspect_ratio.update    ();
+  config.keyboard.clear_enemies.update   ();
+  config.keyboard.respawn_enemies.update ();
+  config.keyboard.battle_timestop.update ();
 
   screenshots.add_to_steam->store    (config.screenshots.import_to_steam);
   screenshots.keep->store            (config.screenshots.keep);
   screenshots.hudless_keybind->store (config.keyboard.hudless.human_readable);
+  render.aspect_ratio_keybind->store (config.keyboard.aspect_ratio.human_readable);
 
   keyboard.swap_wasd->store        (config.keyboard.swap_wasd);
   keyboard.swap_keys->store        (config.keyboard.swap_keys);
+  keyboard.clear_enemies->store    (config.keyboard.clear_enemies.human_readable);
+  keyboard.respawn_enemies->store  (config.keyboard.respawn_enemies.human_readable);
+  keyboard.battle_timestop->store  (config.keyboard.battle_timestop.human_readable);
 
   sys.version->store             (TBF_VER_STR);
   //sys.intro_video->store         (config.system.intro_video);
@@ -1172,4 +1280,11 @@ keybind_s::parse (void)
 
     wszTok = std::wcstok (nullptr, L"+", &wszBuf);
   }
+}
+
+
+bool
+TBF_NV_DriverProfileChanged (void)
+{
+  return nv_profile_change;
 }

@@ -210,7 +210,7 @@ CreateTimerQueueTimer_Override (
   _In_     ULONG               Flags
 )
 {
-  // Fix compliance related issues present in both
+  // Fix compliance related issues   in both
   //   Tales of Symphonia and Zestiria
   if (Flags & 0x8) {
     Period = 0;
@@ -222,6 +222,71 @@ CreateTimerQueueTimer_Override (
 void
 NamcoLimiter_Detour (void)
 {
+  static uint64_t frame_num      = 0;
+  static uint8_t  last_load_flag = *TBF_GetFlagFromIdx (24);
+
+  ++frame_num;
+
+  extern int needs_aspect;
+
+  uint8_t test_state [32] = { 0 };
+  test_state [8] = 1;
+
+  if (! memcmp (TBF_GetFlagFromIdx (0), test_state, 26))
+  {
+    if (game_state.clear_enemies.want && *TBF_GetFlagFromIdx (8))
+    {
+      if (game_state.clear_enemies.frame == 0)
+      {
+        *TBF_GetFlagFromIdx (27)       = 1;
+        game_state.clear_enemies.frame = frame_num;
+      }
+      
+      else {
+        *TBF_GetFlagFromIdx (27)       = 0;
+        game_state.clear_enemies.want  = false;
+        game_state.clear_enemies.frame = 0;
+      }
+    }
+
+    if (game_state.respawn_enemies.want && *TBF_GetFlagFromIdx (8))
+    {
+      if (game_state.respawn_enemies.frame == 0 || game_state.respawn_enemies.frame > frame_num - 60) {
+        *TBF_GetFlagFromIdx (27) = 1;
+
+        if (game_state.respawn_enemies.frame == 0)
+          game_state.respawn_enemies.frame = frame_num;
+      }
+
+      else
+      {
+        *TBF_GetFlagFromIdx (27)         = 0;
+        game_state.respawn_enemies.frame = 0;
+        game_state.respawn_enemies.want  = false;
+      }
+    }
+  }
+
+  // No Limit While Loading
+  if (*TBF_GetFlagFromIdx (24))
+  {
+    if (config.framerate.replace_limiter && (! last_load_flag))
+      tbf::FrameRateFix::DisengageLimiter ();
+    else {
+      last_load_flag = *TBF_GetFlagFromIdx (24);
+      return;
+    }
+  }
+
+  else if (last_load_flag)
+  {
+    if (config.framerate.replace_limiter)
+      tbf::FrameRateFix::BlipFramerate ();
+  }
+
+  last_load_flag = *TBF_GetFlagFromIdx (24);
+
+
   if ((! config.framerate.replace_limiter) || tbf::FrameRateFix::need_reset)
     NamcoLimiter_Original ();
 
@@ -265,7 +330,8 @@ tbf::FrameRateFix::Init (void)
   uint8_t mask []    = { 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff };
 
   void* limiter_addr =
-    TBF_Scan (sig, sizeof (sig), mask);
+    TBF_Scan (sig, sizeof (sig), mask, 16);
+  // x64 functions are 16-byte aligned in Microsoft's ABI, use this to speed the search up
 
   uintptr_t rip      = (uintptr_t)limiter_addr + 18;
 

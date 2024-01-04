@@ -74,7 +74,7 @@ TBF_DrawFileList (bool& can_scroll)
       {
         enumerated_source_s source;
 
-        char szFileName [MAX_PATH] = { };
+        char szFileName [MAX_PATH] = { '\0' };
 
         if (archive_no != std::numeric_limits <unsigned int>::max ()) {
           sprintf (szFileName, "%ws", archives [archive_no].c_str ()); 
@@ -364,8 +364,8 @@ TBF_LiveShaderClassView (tbf_shader_class shader_type, bool& can_scroll)
 
   if (ImGui::IsMouseHoveringRect (list->last_min, list->last_max))
   {
-         if (ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
-    else if (ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+         if (ImGui::GetIO ().KeysDown [VK_OEM_4] && ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+    else if (ImGui::GetIO ().KeysDown [VK_OEM_6] && ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
   }
 
   ImGui::PushStyleVar   (ImGuiStyleVar_ChildWindowRounding, 0.0f);
@@ -386,8 +386,8 @@ TBF_LiveShaderClassView (tbf_shader_class shader_type, bool& can_scroll)
     ImGui::BulletText   ("Press ] while the mouse is hovering this list to select the next shader");
     ImGui::EndTooltip   ();
 
-         if (ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
-    else if (ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+         if (ImGui::GetIO ().KeysDown [VK_OEM_4] && ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+    else if (ImGui::GetIO ().KeysDown [VK_OEM_6] && ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
   }
 
   if (shaders.size ())
@@ -465,6 +465,49 @@ TBF_LiveShaderClassView (tbf_shader_class shader_type, bool& can_scroll)
                                                                "Clamp Texture Coordinates For Selected Vertex Shader",
                         &tracker->clamp_coords );
 
+
+    if (config.render.aspect_correction)
+    {
+    bool whitelist =  shader_type == tbf_shader_class::Pixel ? tbf::RenderFix::aspect_ratio_data.whitelist.pixel_shaders.count  (tracker->crc32) :
+                                                               tbf::RenderFix::aspect_ratio_data.whitelist.vertex_shaders.count (tracker->crc32),
+         blacklist =  shader_type == tbf_shader_class::Pixel ? tbf::RenderFix::aspect_ratio_data.blacklist.pixel_shaders.count  (tracker->crc32) :
+                                                               tbf::RenderFix::aspect_ratio_data.blacklist.vertex_shaders.count (tracker->crc32);
+
+    if (ImGui::Checkbox ( shader_type == tbf_shader_class::Pixel ? "Force Aspect Ratio Correction ON For Selected Pixel Shader" :
+                                                                   "Force Aspect Ratio Correction ON For Selected Vertex Shader",
+                            &whitelist ))
+    {
+      if (whitelist)
+        shader_type == tbf_shader_class::Pixel ? tbf::RenderFix::aspect_ratio_data.whitelist.pixel_shaders.emplace  (tracker->crc32) :
+                                                 tbf::RenderFix::aspect_ratio_data.whitelist.vertex_shaders.emplace (tracker->crc32);
+      else
+        shader_type == tbf_shader_class::Pixel ? tbf::RenderFix::aspect_ratio_data.whitelist.pixel_shaders.erase  (tracker->crc32) :
+                                                 tbf::RenderFix::aspect_ratio_data.whitelist.vertex_shaders.erase (tracker->crc32);
+    }
+
+    if (ImGui::Checkbox ( shader_type == tbf_shader_class::Pixel ? "Force Aspect Ratio Correction OFF For Selected Pixel Shader" :
+                                                                   "Force Aspect Ratio Correction OFF For Selected Vertex Shader",
+                            &blacklist ))
+    {
+      if (blacklist)
+        shader_type == tbf_shader_class::Pixel ? tbf::RenderFix::aspect_ratio_data.blacklist.pixel_shaders.emplace  (tracker->crc32) :
+                                                 tbf::RenderFix::aspect_ratio_data.blacklist.vertex_shaders.emplace (tracker->crc32);
+      else
+        shader_type == tbf_shader_class::Pixel ? tbf::RenderFix::aspect_ratio_data.blacklist.pixel_shaders.erase  (tracker->crc32) :
+                                                 tbf::RenderFix::aspect_ratio_data.blacklist.vertex_shaders.erase (tracker->crc32);
+    }
+
+      if (shader_type == tbf_shader_class::Vertex)
+      {
+        extern uint32_t aspect_ratio_trigger;
+        bool trigger = (tracker->crc32 == aspect_ratio_trigger);
+      
+        if (ImGui::Checkbox ( "Use as Aspect Ratio Trigger", &trigger))
+          aspect_ratio_trigger = trigger ? tracker->crc32 : 0x00;
+      }
+    }
+
+
     ImGui::Separator      ();
     ImGui::EndGroup       ();
 
@@ -532,10 +575,12 @@ TBF_LiveShaderClassView (tbf_shader_class shader_type, bool& can_scroll)
           snprintf ( szOrdinal, 64, " (%c%-3lu) ",
                         it2.RegisterSet != D3DXRS_SAMPLER ? 'c' : 's',
                           it2.RegisterIndex );
-          snprintf ( szOrdEl,  96,  "%s::%lu", // Uniquely identify parameters that share registers
-                       szOrdinal, el++ );
-          snprintf ( szName, 192, "%-24s :%s",
-                       it2.Name, szOrdinal );
+          snprintf ( szOrdEl,  96,  "%s::%lu %c", // Uniquely identify parameters that share registers
+                       szOrdinal, el++, shader_type == tbf_shader_class::Pixel ? 'p' : 'v' );
+          snprintf ( szName, 192, "[%s] %-24s :%s",
+                       shader_type == tbf_shader_class::Pixel ? "ps" :
+                                                                "vs",
+                         it2.Name, szOrdinal );
 
           if (it2.Type == D3DXPT_FLOAT && it2.Class == D3DXPC_VECTOR)
           {
@@ -555,10 +600,12 @@ TBF_LiveShaderClassView (tbf_shader_class shader_type, bool& can_scroll)
         snprintf ( szOrdinal, 64, " (%c%-3lu) ",
                      it.RegisterSet != D3DXRS_SAMPLER ? 'c' : 's',
                         it.RegisterIndex );
-        snprintf ( szOrdEl,  96,  "%s::%lu", // Uniquely identify parameters that share registers
-                       szOrdinal, el++ );
-        snprintf ( szName, 192, "%-24s :%s",
-                     it.Name, szOrdinal );
+        snprintf ( szOrdEl,  96,  "%s::%lu %c", // Uniquely identify parameters that share registers
+                       szOrdinal, el++, shader_type == tbf_shader_class::Pixel ? 'p' : 'v' );
+        snprintf ( szName, 192, "[%s] %-24s :%s",
+                     shader_type == tbf_shader_class::Pixel ? "ps" :
+                                                              "vs",
+                         it.Name, szOrdinal );
 
         if (it.Type == D3DXPT_FLOAT && it.Class == D3DXPC_VECTOR)
         {
@@ -602,6 +649,8 @@ TBF_LiveShaderClassView (tbf_shader_class shader_type, bool& can_scroll)
 void
 TBF_LiveVertexStreamView (bool& can_scroll)
 {
+  static int filter_type = 0; // ALL
+
   ImGui::BeginGroup ();
 
   static float last_width = 256.0f;
@@ -628,9 +677,21 @@ TBF_LiveVertexStreamView (bool& can_scroll)
   tbf::RenderFix::vertex_buffer_tracking_s*
     tracker = &tbf::RenderFix::tracked_vb;
 
-  std::vector <IDirect3DVertexBuffer9 *>
-    buffers   ( tbf::RenderFix::last_frame.vertex_buffers.begin (),
-                tbf::RenderFix::last_frame.vertex_buffers.end   () );
+  std::vector <IDirect3DVertexBuffer9 *> buffers;
+
+  switch (filter_type)
+  {
+    case 2:
+      for (auto it : tbf::RenderFix::last_frame.vertex_buffers.immutable) if (it != nullptr) buffers.emplace_back (it);
+      break;
+    case 1:
+      for (auto it : tbf::RenderFix::last_frame.vertex_buffers.dynamic)   if (it != nullptr) buffers.emplace_back (it);
+      break;
+    case 0:
+      for (auto it : tbf::RenderFix::last_frame.vertex_buffers.immutable) if (it != nullptr) buffers.emplace_back (it);
+      for (auto it : tbf::RenderFix::last_frame.vertex_buffers.dynamic)   if (it != nullptr) buffers.emplace_back (it);
+      break;
+  };
 
   if (list->dirty)
   {
@@ -665,8 +726,8 @@ TBF_LiveVertexStreamView (bool& can_scroll)
 
   if (ImGui::IsMouseHoveringRect (list->last_min, list->last_max))
   {
-         if (ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
-    else if (ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+         if (ImGui::GetIO ().KeysDown [VK_OEM_4] && ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+    else if (ImGui::GetIO ().KeysDown [VK_OEM_6] && ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
   }
 
   ImGui::PushStyleVar   (ImGuiStyleVar_ChildWindowRounding, 0.0f);
@@ -687,8 +748,8 @@ TBF_LiveVertexStreamView (bool& can_scroll)
     ImGui::BulletText   ("Press ] while the mouse is hovering this list to select the next shader");
     ImGui::EndTooltip   ();
 
-         if (ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
-    else if (ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+         if (ImGui::GetIO ().KeysDown [VK_OEM_4] && ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+    else if (ImGui::GetIO ().KeysDown [VK_OEM_6] && ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
   }
 
   if (buffers.size ())
@@ -739,27 +800,252 @@ TBF_LiveVertexStreamView (bool& can_scroll)
     }
   }
 
+  else {
+    tracker->vertex_buffer = nullptr;
+  }
+
   ImGui::EndChild      ();
   ImGui::PopStyleColor ();
 
   ImGui::SameLine      ();
   ImGui::BeginGroup    ();
 
-  if (ImGui::IsItemHoveredRect ()) {
-         if (ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) list->sel--;
-    else if (ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) list->sel++;
+  if (ImGui::IsItemHoveredRect ())
+  {
+         if (ImGui::GetIO ().KeysDown [VK_OEM_4] && ImGui::GetIO ().KeysDownDuration [VK_OEM_4] == 0.0f) { list->sel--;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+    else if (ImGui::GetIO ().KeysDown [VK_OEM_6] && ImGui::GetIO ().KeysDownDuration [VK_OEM_6] == 0.0f) { list->sel++;  ImGui::GetIO ().WantCaptureKeyboard = true; }
+
+    if ( ImGui::GetIO ().KeysDownDuration ['W'] == 0.0f &&
+         ImGui::GetIO ().KeysDown [VK_CONTROL]          &&
+         ImGui::GetIO ().KeysDown [VK_SHIFT]               )
+    {
+      ImGui::GetIO ().WantCaptureKeyboard = true;
+
+      if (tracker->vertex_buffer != nullptr) {
+        bool wireframe = tracker->wireframes.count (tracker->vertex_buffer);
+        
+        if (wireframe && tracker->wireframes.count (tracker->vertex_buffer))
+          tracker->wireframes.erase   (tracker->vertex_buffer);
+        else
+          tracker->wireframes.emplace (tracker->vertex_buffer);
+      }
+    }
   }
 
-  if (tracker->vertex_buffer != nullptr)
+  ImGui::Combo ("Vertex Buffer Filter", &filter_type, "  All   Geometry (Huge List)\0"
+                                                      "Dynamic Geometry (Models)\0"
+                                                      " Static Geometry (World)\0\0", 3 );
+
+  ImGui::Checkbox ("Cancel Draws Using Selected Vertex Buffer",  &tracker->cancel_draws);  ImGui::SameLine ();
+
+  if (tracker->cancel_draws)
+    ImGui::TextDisabled ("%lu Skipped Draw%c Last Frame [%lu Instanced]", tracker->num_draws, tracker->num_draws != 1 ? 's' : ' ', tracker->instanced);
+  else
+    ImGui::TextDisabled ("%lu Draw%c Last Frame [%lu Instanced]        ", tracker->num_draws, tracker->num_draws != 1 ? 's' : ' ', tracker->instanced);
+
+  ImGui::Checkbox ("Highlight Selected Vertex Buffer (Wireframe)", &tracker->wireframe);
+
+  ImGui::Separator ();
+
+
+  if ( tracker->vertex_buffer != nullptr &&
+         ( tbf::RenderFix::last_frame.vertex_buffers.dynamic.count   (tracker->vertex_buffer) ||
+           tbf::RenderFix::last_frame.vertex_buffers.immutable.count (tracker->vertex_buffer) ) )
   {
-    ImGui::Checkbox ("Cancel Draws Using Selected Vertex Buffer",  &tracker->cancel_draws);  ImGui::SameLine ();
+    bool wireframe = tracker->wireframes.count (tracker->vertex_buffer);
 
-    if (tracker->cancel_draws)
-      ImGui::TextDisabled ("%lu Skipped Draw%c Last Frame", tracker->num_draws, tracker->num_draws != 1 ? 's' : ' ');
-    else
-      ImGui::TextDisabled ("%lu Draw%c Last Frame        ", tracker->num_draws, tracker->num_draws != 1 ? 's' : ' ');
+    extern std::wstring
+    SK_D3D9_UsageToStr (DWORD dwUsage);
 
-    ImGui::Checkbox ("Draw Selected Vertex Buffer In Wireframe", &tracker->wireframe);
+    D3DVERTEXBUFFER_DESC desc;
+    if (SUCCEEDED (tracker->vertex_buffer->GetDesc (&desc)))
+    {
+      ImGui::BeginGroup   ();
+      ImGui::PushStyleVar (ImGuiStyleVar_ChildWindowRounding, 20.0f);
+
+      ImVec4 border_color = wireframe ? ImVec4 (1.0f, 0.5f, 0.5f, 1.0f) :
+                              tracker->wireframe ? 
+                                ImVec4 (0.5f, 0.5f, 1.0f, 1.0f) :
+                                ImVec4 (0.6f, 0.6f, 0.6f, 1.0f);
+
+      ImGui::PushStyleColor (ImGuiCol_Border, border_color);
+
+      static int last_count = 1;
+
+      ImGui::BeginChild     ( "Buffer Overview",
+                              ImVec2 ( font_size * 44.0f,
+                                       font_size * 8.0f +
+                                       font_size * (float)last_count ),
+                                true,
+                                  ImGuiWindowFlags_AlwaysAutoResize );
+
+      ImGui::TextColored (ImVec4 (1.0f, 1.0f, 1.0f, 1.0f), "Format:  "); ImGui::SameLine ();
+      ImGui::TextColored (ImVec4 (1.0f, 1.0f, 0.4f, 1.0f), "%ws",  SK_D3D9_FormatToStr (desc.Format).c_str ());
+      ImGui::TextColored (ImVec4 (1.0f, 1.0f, 1.0f, 1.0f), "Type:    "); ImGui::SameLine ();
+      ImGui::TextColored (ImVec4 (1.0f, 1.0f, 0.4f, 1.0f), "%s",  desc.Type == D3DRTYPE_VERTEXBUFFER ? "Vertex Buffer" :
+                                                                  desc.Type == D3DRTYPE_INDEXBUFFER  ? "Index Buffer"  :
+                                                                                                       "Unknown?!" );
+      ImGui::TextColored (ImVec4 (1.0f, 1.0f, 1.0f, 1.0f), "Usage:   "); ImGui::SameLine ();
+      ImGui::TextColored (ImVec4 (1.0f, 1.0f, 0.4f, 1.0f), "%ws",  SK_D3D9_UsageToStr (desc.Usage).c_str ());
+      ImGui::TextColored (ImVec4 (1.0f, 1.0f, 1.0f, 1.0f), "Size:    "); ImGui::SameLine ();
+      ImGui::TextColored (ImVec4 (1.0f, 1.0f, 0.4f, 1.0f), "%llu", desc.Size);
+
+      last_count = 0;
+
+      for (auto vtx_decl : tracker->vertex_decls)
+      {
+        ++last_count;
+
+        static D3DVERTEXELEMENT9 elem_decl [MAXD3DDECLLENGTH];
+        static UINT              num_elems;
+
+        auto SK_D3D9_DeclTypeToStr = [](D3DDECLTYPE type) ->
+          const char* 
+          {
+            switch (type)
+            {
+              case D3DDECLTYPE_FLOAT1:     return "float";    
+              case D3DDECLTYPE_FLOAT2:     return "float2";
+              case D3DDECLTYPE_FLOAT3:     return "float3";
+              case D3DDECLTYPE_FLOAT4:     return "float4";
+              case D3DDECLTYPE_D3DCOLOR:   return "D3DCOLOR";
+              case D3DDECLTYPE_UBYTE4:     return "ubyte4";
+              case D3DDECLTYPE_SHORT2:     return "short2";
+              case D3DDECLTYPE_SHORT4:     return "short4";
+              case D3DDECLTYPE_UBYTE4N:    return "ubyte4 (UNORM)";
+              case D3DDECLTYPE_SHORT2N:    return "short2 (SNORM)";
+              case D3DDECLTYPE_SHORT4N:    return "short2 (SNORM)";
+              case D3DDECLTYPE_USHORT2N:   return "short2 (UNORM)";
+              case D3DDECLTYPE_USHORT4N:   return "short4 (UNORM)";
+              case D3DDECLTYPE_UDEC3:      return "udec3";
+              case D3DDECLTYPE_DEC3N:      return "dec3 (NORM)";
+              case D3DDECLTYPE_FLOAT16_2:  return "half2";
+              case D3DDECLTYPE_FLOAT16_4:  return "half4";
+              case D3DDECLTYPE_UNUSED:     return "UNUSED";
+            }
+
+            return "UNKNOWN";
+          };
+
+        auto SK_D3D9_DeclUsageToStr = [](D3DDECLUSAGE usage, int idx) ->
+          const char*
+          {
+            static char szOut [64] = { '\0' };
+
+            switch (usage)
+            {
+              case D3DDECLUSAGE_POSITION:     snprintf (szOut, 64, "POSITION     [%lu]", idx); break;
+              case D3DDECLUSAGE_BLENDWEIGHT:  snprintf (szOut, 64, "BLENDWEIGHT  [%lu]", idx); break;
+              case D3DDECLUSAGE_BLENDINDICES: snprintf (szOut, 64, "BLENDINDICES [%lu]", idx); break;
+              case D3DDECLUSAGE_NORMAL:       snprintf (szOut, 64, "NORMAL       [%lu]", idx); break;
+              case D3DDECLUSAGE_PSIZE:        snprintf (szOut, 64, "PSIZE"                  ); break;
+              case D3DDECLUSAGE_TEXCOORD:     snprintf (szOut, 64, "TEXCOORD     [%lu]", idx); break;
+              case D3DDECLUSAGE_TANGENT:      snprintf (szOut, 64, "TANGENT      [%lu]", idx); break;
+              case D3DDECLUSAGE_BINORMAL:     snprintf (szOut, 64, "BINORMAL     [%lu]", idx); break;
+              case D3DDECLUSAGE_TESSFACTOR:   snprintf (szOut, 64, "TESSFACTOR   [%lu]", idx); break;
+              case D3DDECLUSAGE_POSITIONT:    snprintf (szOut, 64, "POSITIONT"              ); break;
+              case D3DDECLUSAGE_COLOR:        snprintf (szOut, 64, "COLOR        [%lu]", idx); break;
+              case D3DDECLUSAGE_FOG:          snprintf (szOut, 64, "FOG"                    ); break;
+              case D3DDECLUSAGE_DEPTH:        snprintf (szOut, 64, "DEPTH        [%lu]", idx); break;
+              case D3DDECLUSAGE_SAMPLE:       snprintf (szOut, 64, "SV_SampleIndex"         ); break;
+            };
+
+            return szOut;
+          };
+
+        if (SUCCEEDED (vtx_decl->GetDeclaration (elem_decl, &num_elems)))
+        {
+          ImGui::Separator ();
+
+          for (UINT i = 0; i < num_elems; i++)
+          {
+            if (elem_decl [i].Type != D3DDECLTYPE_UNUSED)
+            {
+              ++last_count;
+
+              ImGui::TextColored (ImVec4 (0.9f, 0.9f, 0.9f, 1.0f),    "Stream %3lu ", elem_decl [i].Stream);
+              ImGui::SameLine    ();
+              ImGui::TextColored (ImVec4 (0.66f, 0.66f, 0.66f, 1.0f), "(+%02lu): ",
+                              elem_decl [i].Offset);
+              ImGui::SameLine    ();
+              ImGui::TextColored (ImVec4 (0.35f, 0.85f, 0.35f, 1.0f), "%16s ",
+                                SK_D3D9_DeclTypeToStr  ((D3DDECLTYPE)elem_decl [i].Type) );
+              ImGui::SameLine    ();
+              ImGui::TextColored (ImVec4 (0.6f, 0.6f, 1.0f, 1.0f), "\"Attrib%02lu\"", i);
+              ImGui::SameLine    ();
+              ImGui::TextColored (ImVec4 (1.0f, 1.0f, 1.0f, 1.0f), " : %s",
+                                SK_D3D9_DeclUsageToStr ((D3DDECLUSAGE)elem_decl [i].Usage, elem_decl [i].UsageIndex) );
+            }
+          }
+
+          --last_count;
+        }
+      }
+      ImGui::EndChild ();
+
+      ImGui::PopStyleColor ();
+      ImGui::PopStyleVar   ();
+      ImGui::EndGroup      ();
+
+      if (ImGui::IsItemHoveredRect () && tracker->textures.size ())
+      {
+        ImGui::BeginTooltip ();
+
+        D3DFORMAT fmt = D3DFMT_UNKNOWN;
+
+        for ( auto it : tracker->textures )
+        {
+          ISKTextureD3D9* pTex = tbf::RenderFix::tex_mgr.getTexture (it)->d3d9_tex;
+          
+          if (pTex && pTex->pTex)
+          {
+            D3DSURFACE_DESC desc;
+            if (SUCCEEDED (pTex->pTex->GetLevelDesc (0, &desc)))
+            {
+              fmt = desc.Format;
+              ImGui::Image ( pTex->pTex, ImVec2  ( std::max (64.0f, (float)desc.Width / 16.0f),
+        ((float)desc.Height / (float)desc.Width) * std::max (64.0f, (float)desc.Width / 16.0f) ),
+                                         ImVec2  (0,0),             ImVec2  (1,1),
+                                         ImColor (255,255,255,255), ImColor (242,242,13,255) );
+            }
+
+            ImGui::SameLine ();
+
+            ImGui::BeginGroup ();
+            ImGui::Text       ("Texture: %08lx", it);
+            ImGui::Text       ("Format:  %ws",   SK_D3D9_FormatToStr (fmt).c_str ());
+            ImGui::EndGroup   ();
+          }
+        }
+
+        ImGui::EndTooltip ();
+      }
+
+      ImGui::SameLine ();
+      ImGui::Checkbox ("Always Draw This Buffer In Wireframe", &wireframe);
+      
+      if (wireframe)
+        tracker->wireframes.emplace (tracker->vertex_buffer);
+      else if (tracker->wireframes.count (tracker->vertex_buffer))
+        tracker->wireframes.erase   (tracker->vertex_buffer);
+    }
+
+    if (tracker->vertex_shaders.size () > 0 || tracker->pixel_shaders.size () > 0)
+    {
+      ImGui::Separator ();
+
+      ImGui::Columns (2);
+
+      for ( auto it : tracker->vertex_shaders )
+        ImGui::Text ("Vertex Shader: %08x", it);
+
+      ImGui::NextColumn ();
+
+      for ( auto it : tracker->pixel_shaders )
+        ImGui::Text ("Pixel Shader: %08x", it);
+
+      ImGui::Columns (1);
+    }
   }
   else
     tracker->cancel_draws = false;
@@ -789,8 +1075,8 @@ TBFix_TextureModDlg (void)
                    &show_dlg,
                      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_ShowBorders );
 
-  bool can_scroll = ImGui::IsMouseHoveringRect ( ImVec2 (ImGui::GetWindowPos ().x,                             ImGui::GetWindowPos ().y),
-                                                 ImVec2 (ImGui::GetWindowPos ().x + ImGui::GetWindowSize ().x, ImGui::GetWindowPos ().y + ImGui::GetWindowSize ().y) );
+  bool can_scroll = ImGui::IsWindowFocused () && ImGui::IsMouseHoveringRect ( ImVec2 (ImGui::GetWindowPos ().x,                             ImGui::GetWindowPos ().y),
+                                                                              ImVec2 (ImGui::GetWindowPos ().x + ImGui::GetWindowSize ().x, ImGui::GetWindowPos ().y + ImGui::GetWindowSize ().y) );
 
   ImGui::PushItemWidth (ImGui::GetWindowWidth () * 0.666f);
 
@@ -895,6 +1181,28 @@ TBFix_TextureModDlg (void)
     ImGui::SameLine ();
 
     ImGui::Checkbox ("Highlight Selected Texture in Game",    &config.textures.highlight_debug_tex);
+
+    bool whitelist = tbf::RenderFix::aspect_ratio_data.whitelist.textures.count (debug_tex_id),
+         blacklist = tbf::RenderFix::aspect_ratio_data.blacklist.textures.count (debug_tex_id);
+
+    if (config.render.aspect_correction)
+    {
+      if (ImGui::Checkbox ("Force Aspect Ratio Correction ON For Selected Texture", &whitelist))
+      {
+        if (whitelist)
+          tbf::RenderFix::aspect_ratio_data.whitelist.textures.emplace (debug_tex_id);
+        else
+          tbf::RenderFix::aspect_ratio_data.whitelist.textures.erase (debug_tex_id);
+      }
+      
+      if (ImGui::Checkbox ("Force Aspect Ratio Correction OFF For Selected Texture", &blacklist))
+      {
+        if (blacklist)
+          tbf::RenderFix::aspect_ratio_data.blacklist.textures.emplace (debug_tex_id);
+        else
+          tbf::RenderFix::aspect_ratio_data.blacklist.textures.erase (debug_tex_id);
+      }
+    }
 
     ImGui::Separator ();
     ImGui::EndChild  ();

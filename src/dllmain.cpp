@@ -56,6 +56,12 @@ volatile DWORD        __TBF_TLS_INDEX   = MAXDWORD;
 SKX_SetPluginName_pfn SKX_SetPluginName = nullptr;
 
 
+// Since changing aspect ratio involves a trip back to the
+//   title screen, keep track of this to inform the user
+//     when that is necessary.
+float                 original_aspect   = 0.0f;
+
+
 
 __declspec (dllexport)
 BOOL
@@ -77,7 +83,13 @@ SKPlugIn_Shutdown (LPVOID* lpReserved)
     TBF_SaveConfig     ();
 
     // Weird thing to do at shutdown, right? :P This avoids any error popups while the game is in fullscreen exclusive.
-    tbf::RenderFix::InstallSGSSAA ();
+    //
+    //   Only change the driver profile if settings change in-game or
+    //     if a non-off mode is selected.
+    if ( config.render.nv.sgssaa_mode != 0 ||
+         TBF_NV_DriverProfileChanged () )
+      tbf::RenderFix::InstallSGSSAA ();
+
     tbf::RenderFix::Shutdown      ();
     //tbf::KeyboardFix::Shutdown  ();
 
@@ -154,6 +166,8 @@ SKPlugIn_Init (HMODULE hModSpecialK)
     TBF_SaveConfig ();
   }
 
+  original_aspect = config.render.aspect_ratio;
+
   config.system.injector             = injector_dll;
 
   SKX_SetPluginName = 
@@ -225,7 +239,7 @@ SKPlugIn_Init (HMODULE hModSpecialK)
 
           tbf::FrameRateFix::Init ();
 
-          if (tbf::RenderFix::fullscreen)
+          if (tbf::RenderFix::fullscreen && tbf::RenderFix::hWndDevice)
           {
             //
             // Fix input problems in game (namely, ESC key doesn't register unti Alt+Tab).

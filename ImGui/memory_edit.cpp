@@ -20,13 +20,20 @@
  *
 **/
 
-#ifndef __TBF__SCANNER_H__
-#define __TBF__SCANNER_H__
+#define _CRT_SECURE_NO_WARNINGS
 
-#include <stdint.h>
+#define NOMINMAX
 
-void*     TBF_Scan        (uint8_t* pattern, size_t len, uint8_t* mask = nullptr, int align=1);
-void*     TBF_ScanEx (uint8_t* pattern, size_t len, uint8_t* mask, void* after, int align=1);
-uintptr_t TBF_GetBaseAddr (void);
+#include "DLL_VERSION.H"
+#include "imgui\imgui.h"
 
-#endif /* __TBF__SCANNER_H__ */
+#include <string>
+#include <vector>
+#include <algorithm>
+
+#include "config.h"
+#include "command.h"
+#include "render.h"
+#include "textures.h"
+
+#include <atlbase.h>
